@@ -1,0 +1,255 @@
+<?php
+/*
+Plugin Name: GoVPS Provisioning Plugin
+Description: Automatically create VPS when a product order is completed
+Version: 1.0
+Author: Danie Demola
+*/
+
+if (!defined('ABSPATH')) exit; // Exit if accessed directly
+
+class GoVPSProvisioningPlugin
+{
+    private $table_name;
+
+    public function __construct()
+    {
+        global $wpdb;
+        $this->table_name = $wpdb->prefix . 'vps_servers';
+
+        // Hook into order completion
+        // add_action('woocommerce_order_status_completed', [$this, 'provision_vps_for_order']);
+        // Hook for initial subscription order
+        add_action('woocommerce_subscription_payment_complete', [$this, 'provision_vps_for_subscription'], 10, 1);
+
+        // Optional: Hook for renewal orders
+        add_action('woocommerce_subscription_renewal_payment_complete', [$this, 'provision_vps_for_subscription'], 10, 1);
+
+        // Activation hook for creating database table
+        register_activation_hook(__FILE__, [$this, 'create_vps_table']);
+
+        // Admin menu and page
+        add_action('admin_menu', [$this, 'add_admin_menu']);
+    }
+
+    public function provision_vps_for_subscription($subscription)
+    {
+        $this->log_webhook_request($subscription);
+        $order_id = $subscription->get_last_order();
+        $this->provision_vps_for_order($order_id);
+    }
+
+    public function create_vps_table()
+    {
+        global $wpdb;
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $sql = "CREATE TABLE {$this->table_name} (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            order_id mediumint(9) NOT NULL,
+            product_type VARCHAR(50) NOT NULL,
+            vps_id mediumint(9) NOT NULL,
+            ip_address VARCHAR(50) NOT NULL,
+            port mediumint(9) NOT NULL,
+            username VARCHAR(100) NOT NULL,
+            password VARCHAR(100) NOT NULL,
+            paid_at DATETIME NOT NULL,
+            paid_to DATETIME NOT NULL,
+            PRIMARY KEY  (id)
+        ) {$charset_collate};";
+
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql);
+    }
+
+    public function provision_vps_for_order($order_id)
+    {
+        $order = wc_get_order($order_id);
+
+        foreach ($order->get_items() as $item_id => $item) {
+            $product = $item->get_product();
+            $product_id = $product->get_id();
+
+            // Get product name
+            $product_name = $product->get_name();
+
+            // Map product to VPS tariff
+            $tariff_map = [
+                'basic_product' => 'Start',
+                'standard_product' => 'Expert',
+                'classic_product' => 'Classic',
+                'professional_product' => 'Greate'
+            ];
+
+            $product_slug = $product->get_slug();
+            $tariff = $tariff_map[$product_slug] ?? null;
+
+            if (!$tariff) continue;
+
+            // Get order duration (months)
+            $order_duration = $this->get_order_duration($order);
+
+            // Send API request
+            $api_response = $this->send_vps_creation_request($tariff, $order_duration);
+
+            if ($api_response && $api_response['status']) {
+                // Save VPS details to database
+                $this->save_vps_details($order_id, $tariff, $api_response['data']);
+
+                // Send credentials email
+                $this->send_vps_credentials_email($order, $api_response['data']);
+            }
+        }
+    }
+
+    private function send_vps_creation_request($tariff, $months)
+    {
+        $api_url = 'https://api-test.govpsfx.com/api/get';
+
+        $body = [
+            'tariff' => $tariff,
+            'type' => 'Virtual',
+            'language' => 'ENG',
+            'month' => $months
+        ];
+
+        $response = wp_remote_post($api_url, [
+            'body' => $body,
+            'headers' => [
+                'Secret' => 'Testsurgevps:t8E649y59f95mi95cFVm',
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            ]
+        ]);
+
+        if (is_wp_error($response)) {
+            // Log error
+            error_log('VPS API Request Error: ' . $response->get_error_message());
+            $this->log_webhook_request($response->get_error_message(), false);
+            return false;
+        }
+        $this->log_webhook_request($response);
+        return json_decode(wp_remote_retrieve_body($response), true);
+    }
+
+    private function save_vps_details($order_id, $product_type, $vps_data)
+    {
+        global $wpdb;
+
+        $wpdb->insert(
+            $this->table_name,
+            [
+                'order_id' => $order_id,
+                'product_type' => $product_type,
+                'vps_id' => $vps_data['id'],
+                'ip_address' => $vps_data['ip'],
+                'port' => $vps_data['port'],
+                'username' => $vps_data['username'],
+                'password' => $vps_data['password'],
+                'paid_at' => date('Y-m-d H:i:s', strtotime($vps_data['paid_at'])),
+                'paid_to' => date('Y-m-d H:i:s', strtotime($vps_data['paid_to']))
+            ]
+        );
+    }
+
+    private function send_vps_credentials_email($order, $vps_data)
+    {
+        $to = $order->get_billing_email();
+        $subject = 'Your New VPS Credentials are Ready!';
+        $message = '
+        <p>Dear ' . $order->get_billing_first_name() . ',</p>
+
+        <p>We\'re excited to inform you that your new VPS has been successfully created.</p>
+
+        <p><strong>Here are your login credentials:</strong></p>
+
+        <ul>
+            <li><strong>IP Address:</strong> ' . $vps_data['ip'] . '</li>
+            <li><strong>Port:</strong> ' . $vps_data['port'] . '</li>
+            <li><strong>Username:</strong> ' . $vps_data['username'] . '</li>
+            <li><strong>Password:</strong> ' . $vps_data['password'] . '</li>
+            <li><strong>Paid To:</strong> ' . $vps_data['paid_to'] . '</li>
+        </ul>
+
+        <p>If you have any questions or need further assistance, please don\'t hesitate to contact our support team.</p>
+
+        <p>Best regards,</p>
+
+        <p>Surge VPS</p>
+        <p>support@surgevps.com</p>
+    ';
+
+        wp_mail($to, $subject, $message, array('Content-Type: text/html'));
+    }
+
+    private function get_order_duration($order)
+    {
+        // This is a placeholder. You'll need to implement logic to get the order duration
+        // This could be from a custom field, product variation, or other order metadata
+        return min(max(1, $order->get_meta('_order_duration', true)), 12);
+    }
+
+    public function add_admin_menu()
+    {
+        add_menu_page(
+            'VPS Servers',
+            'VPS Servers',
+            'manage_options',
+            'vps-servers',
+            [$this, 'render_admin_page'],
+            'dashicons-server',
+            30
+        );
+    }
+
+    public function render_admin_page()
+    {
+        global $wpdb;
+        $servers = $wpdb->get_results("SELECT * FROM {$this->table_name} ORDER BY paid_at DESC");
+?>
+        <div class="wrap">
+            <h1>VPS Servers</h1>
+            <table class="wp-list-table widefat fixed striped">
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Product Type</th>
+                        <th>VPS ID</th>
+                        <th>IP Address</th>
+                        <th>Username</th>
+                        <th>Paid At</th>
+                        <th>Paid To</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($servers as $server): ?>
+                        <tr>
+                            <td><?php echo $server->order_id; ?></td>
+                            <td><?php echo $server->product_type; ?></td>
+                            <td><?php echo $server->vps_id; ?></td>
+                            <td><?php echo $server->ip_address; ?></td>
+                            <td><?php echo $server->username; ?></td>
+                            <td><?php echo $server->paid_at; ?></td>
+                            <td><?php echo $server->paid_to; ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+<?php
+    }
+
+
+    private function log_webhook_request($request)
+    {
+        // Get the plugin's log file path
+        $log_file = plugin_dir_path(__FILE__) . 'go-vps--' . date('Y-m-d') . '.log';
+
+        // $request_data = json_decode($request, true);
+        // Write the request to the log file
+        $log_message = "Govps API Response: " . print_r($request, true) . "\n";
+        file_put_contents($log_file, $log_message, FILE_APPEND);
+    }
+}
+
+// Initialize the plugin
+new GoVPSProvisioningPlugin();
