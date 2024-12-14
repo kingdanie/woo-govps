@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: GoVPS Provisioning Plugin
-Description: Automatically create VPS when a product order is completed
+Description: This plugin sends API Requests to GoVPS to create VPS accounts from Completed WooComerce Orders and Sends the VPS Credentials to the Customer.
 Version: 1.1
 Author: Jorion Tech
 Author URI: https://jorionng.com
@@ -251,7 +251,7 @@ class GoVPSProvisioningPlugin
         // Determine API URL and key based on mode
         $api_url = $settings['test_mode'] 
             ? 'https://api-test.govpsfx.com/api/get' 
-            : 'https://autodeploy.govpsfx.com';
+            : 'https://autodeploy.govpsfx.com/api/get';
         
         $api_key = $settings['test_mode'] 
             ? $settings['test_api_key'] 
