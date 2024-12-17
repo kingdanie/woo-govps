@@ -385,28 +385,35 @@ class GoVPSProvisioningPlugin
     private function send_vps_credentials_email($order, $vps_data)
     {
         $to = $order->get_billing_email();
-        $subject = 'Your New VPS Credentials are Ready!';
+        $subject = '🎉 Your Order is Confirmed! Let the Trading Begin!';
         $message = '
-        <p>Dear ' . $order->get_billing_first_name() . ',</p>
+        <p>Hey ' . $order->get_billing_first_name() . ',</p>
 
-        <p>We\'re excited to inform you that your new VPS has been successfully created.</p>
+        <p>Awesome news! Your order with SurgeVps has been confirmed, and we\'re ready to help you take your Forex trading to the next level! 🚀.</p>
 
-        <p><strong>Here are your login credentials:</strong></p>
+        <p><strong>Your new VPS login credentials:</strong></p>
 
         <ul>
-            <li><strong>IP Address:</strong> ' . $vps_data['ip'] . '</li>
-            <li><strong>Port:</strong> ' . $vps_data['port'] . '</li>
+            <li><strong>IP Address:</strong> ' . $vps_data['ip'] . ':' . $vps_data['port'] .'</li>
             <li><strong>Username:</strong> ' . $vps_data['username'] . '</li>
             <li><strong>Password:</strong> ' . $vps_data['password'] . '</li>
-            <li><strong>Paid To:</strong> ' . $vps_data['paid_to'] . '</li>
+            <li><strong>Start Date:</strong> ' . $vps_data['paid_to'] . '</li>
         </ul>
 
-        <p>If you have any questions or need further assistance, please don\'t hesitate to contact our support team.</p>
+        <p>Your Forex VPS is now all setup and ready for action! <br /> We\'re excited to see you dive in and start trading like a pro.</p>
 
-        <p>Best regards,</p>
+        <p><strong>What\'s Next?</strong></p>
 
-        <p>Surge VPS</p>
-        <p>support@surgevps.com</p>
+        <p>Keep an eye on your inbox—we\'ll send you more exciting deets that you\'ll love. <br /> If you have any questions or need support, our team is just a click away! </p>  
+
+        <p><strong>Contact Us</strong></p>
+        <p>https://surgevps.com/contact/</p>
+
+        <p>Thank you for choosing SurgeVps! We\'re thrilled to have you on board and can\'t wait to see what you achieve.</p>  
+
+        <p>Happy trading!</p>
+        <p>The SurgeVps Team 🌟</p>
+
     ';
 
         wp_mail($to, $subject, $message, array('Content-Type: text/html'));
