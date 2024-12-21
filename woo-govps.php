@@ -5,6 +5,8 @@ Description: This plugin sends API Requests to GoVPS to create VPS accounts from
 Version: 1.2
 Author: Jorion Tech
 Author URI: https://jorionng.com
+Requires at least: 5.0
+Requires PHP: 7.2
 */
 
 if (!defined('ABSPATH')) exit; // Exit if accessed directly
@@ -21,11 +23,14 @@ class GoVPSProvisioningPlugin
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'vps_servers';
 
+        add_action('admin_init', [$this, 'check_dependencies']);
+        add_action('admin_notices', [$this, 'show_dependency_notices']);
+
         // Hook for subscription orders
         add_action('woocommerce_subscription_payment_complete', [$this, 'provision_vps_for_subscription'], 10, 1);
 
         // Optional: Hook for renewal orders
-        add_action('woocommerce_subscription_renewal_payment_complete', [$this, 'provision_vps_for_subscription'], 10, 1);
+        add_action('woocommerce_subscription_renewal_payment_complete', [$this, 'renew_vps_subscription'], 10, 1);
 
         // Activation hook for creating database table
         register_activation_hook(__FILE__, [$this, 'create_vps_table']);
@@ -242,6 +247,30 @@ class GoVPSProvisioningPlugin
         }
     }
 
+
+    public function create_vps_table()
+    {
+        global $wpdb;
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $sql = "CREATE TABLE {$this->table_name} (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            order_id mediumint(9) NOT NULL,
+            product_type VARCHAR(50) NOT NULL,
+            vps_id mediumint(9) NOT NULL,
+            ip_address VARCHAR(50) NOT NULL,
+            port mediumint(9) NOT NULL,
+            username VARCHAR(100) NOT NULL,
+            password VARCHAR(100) NOT NULL,
+            paid_at DATETIME NOT NULL,
+            paid_to DATETIME NOT NULL,
+            PRIMARY KEY  (id)
+        ) {$charset_collate};";
+
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql);
+    }
+
     private function send_vps_creation_request($tariff, $months)
     {
         $settings = get_option($this->option_name);
@@ -272,7 +301,6 @@ class GoVPSProvisioningPlugin
             'body' => $body,
             'headers' => [
                 'Secret' => $api_key,
-                // 'Secret' => 'Testsurgevps:t8E649y59f95mi95cFVm',
                 'Content-Type' => 'application/x-www-form-urlencoded',
                 'Accept' => 'application/json',
             ]
@@ -288,32 +316,108 @@ class GoVPSProvisioningPlugin
         return json_decode(wp_remote_retrieve_body($response), true);
     }
 
+    private function renew_vps_request($vpsId, $months)
+    {
+        $body = [
+            'id' => $vpsId,
+            'month' => $months
+        ];
+
+
+        $settings = get_option($this->option_name);
+
+        // Determine API URL and key based on mode
+        $api_url = $settings['test_mode']
+            ? 'https://api-test.govpsfx.com/api/vm/resume'
+            : 'https://autodeploy.govpsfx.com/api/vm/resume';
+
+        $api_key = $settings['test_mode']
+            ? $settings['test_api_key']
+            : $settings['live_api_key'];
+
+        // Validate API key
+        if (empty($api_key)) {
+            error_log('GoVPS API Key is missing');
+            return false;
+        }
+
+
+        $response = wp_remote_post($api_url, [
+            'body' => $body,
+            'headers' => [
+                'Secret' => $api_key,
+                'Content-Type' => 'application/x-www-form-urlencoded',
+                'Accept' => 'application/json',
+            ]
+        ]);
+
+        if (is_wp_error($response)) {
+            error_log('VPS API Request Error: ' . $response->get_error_message());
+            $this->log_request($response->get_error_message(), false);
+            return false;
+        }
+
+        $this->log_request($response);
+        return json_decode(wp_remote_retrieve_body($response), true);
+    }
+
+    public function renew_vps_subscription($subscription)
+    {
+        global $wpdb;
+
+        // Get the order ID
+        $order_id = $subscription->get_last_order();
+        if (!$order_id) {
+            error_log('No order found for subscription: ' . $subscription->get_id());
+            return;
+        }
+
+        // Query the VPS details from custom table
+        $vps_details = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT vps_id FROM {$this->table_name} WHERE order_id = %d",
+                $order_id
+            )
+        );
+
+        if (!$vps_details) {
+            error_log('No VPS details found for order: ' . $order_id);
+            return;
+        }
+
+        // Get order duration (months)
+        $order_duration = strtolower($subscription->get_billing_period()) === 'year'
+            ? 12
+            : $subscription->data['billing_interval'];
+
+        // Send renewal request
+        $api_response = $this->renew_vps_request($vps_details->vps_id, $order_duration);
+
+        if ($api_response && $api_response['status']) {
+            // Update the paid_to date in the database
+            $wpdb->update(
+                $this->table_name,
+                [
+                    'paid_to' => date('Y-m-d H:i:s', strtotime($api_response['data']['paid_to']))
+                ],
+                ['order_id' => $order_id]
+            );
+
+            // Send a confirmation email
+            $order = wc_get_order($order_id);
+            if ($order) {
+                $this->send_vps_renewal_email($order, [
+                    'paid_to' => $api_response['data']['paid_to']
+                ]);
+            }
+        } else {
+            error_log('Failed to renew VPS for order: ' . $order_id);
+        }
+    }
+
     public function provision_vps_for_subscription($subscription)
     {
         $this->provision_vps_for_order($subscription);
-    }
-
-    public function create_vps_table()
-    {
-        global $wpdb;
-        $charset_collate = $wpdb->get_charset_collate();
-
-        $sql = "CREATE TABLE {$this->table_name} (
-            id mediumint(9) NOT NULL AUTO_INCREMENT,
-            order_id mediumint(9) NOT NULL,
-            product_type VARCHAR(50) NOT NULL,
-            vps_id mediumint(9) NOT NULL,
-            ip_address VARCHAR(50) NOT NULL,
-            port mediumint(9) NOT NULL,
-            username VARCHAR(100) NOT NULL,
-            password VARCHAR(100) NOT NULL,
-            paid_at DATETIME NOT NULL,
-            paid_to DATETIME NOT NULL,
-            PRIMARY KEY  (id)
-        ) {$charset_collate};";
-
-        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-        dbDelta($sql);
     }
 
     public function provision_vps_for_order($subscription)
@@ -375,7 +479,6 @@ class GoVPSProvisioningPlugin
             $this->send_vps_credentials_email($order, $api_response['data']);
         }
     }
-
 
 
     private function save_vps_details($order_id, $product_type, $vps_data)
@@ -450,6 +553,41 @@ class GoVPSProvisioningPlugin
         });
     }
 
+
+    private function send_vps_renewal_email($order, $renewal_data)
+    {
+
+        add_filter('wp_mail_from_name', function ($original_name) {
+            return 'SurgeVps';
+        });
+
+        $to = $order->get_billing_email();
+        $subject = '🎉 Your VPS Has Been Successfully Renewed!';
+        $message = '<p>Hey ' . $order->get_billing_first_name() . ',</p>
+        <p>Great news! Your VPS has been successfully renewed.</p>
+        <p><strong>Renewal Details:</strong></p>
+        <ul>
+            <li><strong>New Expiry Date:</strong> ' . $renewal_data['paid_to'] . '</li>
+        </ul>
+        <p>Your VPS will continue to operate without any interruption.</p>
+        <p>If you have any questions or need support, our team is here to help!</p>
+        <p><strong>Contact Us</strong></p>
+        <p>https://surgevps.com/contact/</p>
+        <p>Thank you for continuing to choose SurgeVps!</p>
+        <p>Best regards,<br>The SurgeVps Team 🌟</p>';
+
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+        );
+
+        wp_mail($to, $subject, $message, $headers);
+
+        // Remove the filters        
+        remove_filter('wp_mail_from_name', function ($original_name) {
+            return 'SurgeVps';
+        });
+    }
+
     private function get_order_duration($order)
     {
         // This is a placeholder. You'll need to implement logic to get the order duration
@@ -467,7 +605,59 @@ class GoVPSProvisioningPlugin
         $log_message = "Govps API Response: " . print_r($request, true) . "\n";
         file_put_contents($log_file, $log_message, FILE_APPEND);
     }
+
+    public function check_dependencies()
+    {
+        if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')))) {
+            if (is_plugin_active(plugin_basename(__FILE__))) {
+                deactivate_plugins(plugin_basename(__FILE__));
+                // Set transient to show notice
+                set_transient('surgevps_deactivated', true);
+            }
+            return false;
+        }
+
+        if (!class_exists('WC_Subscriptions')) {
+            if (is_plugin_active(plugin_basename(__FILE__))) {
+                deactivate_plugins(plugin_basename(__FILE__));
+                // Set transient to show notice
+                set_transient('surgevps_deactivated', true);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    public function show_dependency_notices()
+    {
+        // Check if our plugin was just deactivated
+        if (get_transient('surgevps_deactivated')) {
+            delete_transient('surgevps_deactivated');
+
+            $message = '<div class="error"><p>';
+            $message .= '<strong>SurgeVPS has been deactivated</strong>. ';
+
+            if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')))) {
+                $message .= 'This plugin requires WooCommerce to be installed and activated. ';
+            }
+
+            if (!class_exists('WC_Subscriptions')) {
+                $message .= 'This plugin requires WooCommerce Subscriptions to be installed and activated. ';
+            }
+
+            $message .= 'Please install and activate the required plugins.</p></div>';
+
+            echo $message;
+        }
+    }
 }
 
 // Initialize the plugin
-new GoVPSProvisioningPlugin();
+function surgevps_init()
+{
+    // Initialize the plugin
+    new GoVPSProvisioningPlugin();
+}
+
+add_action('plugins_loaded', 'surgevps_init');
