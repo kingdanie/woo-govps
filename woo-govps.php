@@ -2,7 +2,7 @@
 /*
 Plugin Name: GoVPS Provisioning Plugin
 Description: This plugin sends API Requests to GoVPS to create VPS accounts from Completed WooComerce Orders and Sends the VPS Credentials to the Customer.
-Version: 1.1
+Version: 1.2
 Author: Jorion Tech
 Author URI: https://jorionng.com
 */
@@ -32,15 +32,13 @@ class GoVPSProvisioningPlugin
 
         // Admin menu and page
         add_action('admin_menu', [$this, 'add_admin_menu']);
-        
+
         // Settings initialization
         add_action('admin_init', [$this, 'initialize_settings']);
 
         // Admin notices for missing API keys
         add_action('admin_notices', [$this, 'display_api_key_notice']);
     }
-
-    // ... [Previous methods remain the same] ...
 
     public function add_admin_menu()
     {
@@ -128,7 +126,7 @@ class GoVPSProvisioningPlugin
         // Sanitize API keys
         $output['test_api_key'] = sanitize_text_field($input['test_api_key'] ?? '');
         $output['live_api_key'] = sanitize_text_field($input['live_api_key'] ?? '');
-        
+
         // Sanitize test mode checkbox
         $output['test_mode'] = isset($input['test_mode']) ? 1 : 0;
 
@@ -170,11 +168,11 @@ class GoVPSProvisioningPlugin
             esc_html($args['label'])
         );
     }
-    
+
 
     public function render_settings_page()
     {
-        ?>
+?>
         <div class="wrap">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
             <form action="options.php" method="post">
@@ -185,14 +183,14 @@ class GoVPSProvisioningPlugin
                 ?>
             </form>
         </div>
-        <?php
+    <?php
     }
 
     public function render_admin_page()
     {
         global $wpdb;
         $servers = $wpdb->get_results("SELECT * FROM {$this->table_name} ORDER BY paid_at DESC");
-?>
+    ?>
         <div class="wrap">
             <h1>VPS Servers</h1>
             <table class="wp-list-table widefat fixed striped">
@@ -222,39 +220,39 @@ class GoVPSProvisioningPlugin
                 </tbody>
             </table>
         </div>
-<?php
+        <?php
     }
 
     public function display_api_key_notice()
     {
         $settings = get_option($this->option_name);
-        
+
         // Check if either API key is missing
         if (empty($settings['test_api_key']) || empty($settings['live_api_key'])) {
-            ?>
+        ?>
             <div class="notice notice-warning">
                 <p>
-                    <strong>GoVPS Provisioning Plugin:</strong> 
-                    Please configure your API keys in the 
-                    <a href="<?php echo admin_url('admin.php?page=' . $this->settings_page_slug); ?>">GoVPS Settings</a> 
+                    <strong>GoVPS Provisioning Plugin:</strong>
+                    Please configure your API keys in the
+                    <a href="<?php echo admin_url('admin.php?page=' . $this->settings_page_slug); ?>">GoVPS Settings</a>
                     to enable VPS provisioning.
                 </p>
             </div>
-            <?php
+<?php
         }
     }
 
     private function send_vps_creation_request($tariff, $months)
     {
         $settings = get_option($this->option_name);
-        
+
         // Determine API URL and key based on mode
-        $api_url = $settings['test_mode'] 
-            ? 'https://api-test.govpsfx.com/api/get' 
+        $api_url = $settings['test_mode']
+            ? 'https://api-test.govpsfx.com/api/get'
             : 'https://autodeploy.govpsfx.com/api/get';
-        
-        $api_key = $settings['test_mode'] 
-            ? $settings['test_api_key'] 
+
+        $api_key = $settings['test_mode']
+            ? $settings['test_api_key']
             : $settings['live_api_key'];
 
         // Validate API key
@@ -282,19 +280,17 @@ class GoVPSProvisioningPlugin
 
         if (is_wp_error($response)) {
             error_log('VPS API Request Error: ' . $response->get_error_message());
-            $this->log_webhook_request($response->get_error_message(), false);
+            $this->log_request($response->get_error_message(), false);
             return false;
         }
-        
-        $this->log_webhook_request($response);
+
+        $this->log_request($response);
         return json_decode(wp_remote_retrieve_body($response), true);
     }
 
     public function provision_vps_for_subscription($subscription)
     {
-        // $this->log_webhook_request($subscription);
-        $order_id = $subscription->get_last_order();
-        $this->provision_vps_for_order($order_id);
+        $this->provision_vps_for_order($subscription);
     }
 
     public function create_vps_table()
@@ -320,43 +316,63 @@ class GoVPSProvisioningPlugin
         dbDelta($sql);
     }
 
-    public function provision_vps_for_order($order_id)
+    public function provision_vps_for_order($subscription)
     {
+        $items = $subscription->get_items();
+        $item = reset($items);
+        if (!$item) {
+            error_log('No items found in subscription');
+            return;
+        }
+
+        $product = $item->get_product();
+        if (!$product) {
+            error_log('Could not get product from subscription item');
+            return;
+        }
+
+        // Get the product slug and extract base plan
+        $product_slug = $product->get_slug();
+
+        // Extract the base plan name using regex
+        // This will match 'classic' from 'classic_2' or 'professional' from 'professional_'
+        if (preg_match('/(basic|standard|classic|professional)/', $product_slug, $matches)) {
+            $base_plan = $matches[1];
+        } else {
+            error_log('Could not extract base plan from slug: ' . $product_slug);
+            return;
+        }
+
+
+        // Map product to VPS tariff
+        $tariff_map = [
+            'basic' => 'Start',
+            'standard' => 'Expert',
+            'classic' => 'Classic',
+            'professional' => 'Greate'
+        ];
+
+        $tariff = $tariff_map[$base_plan] ?? null;
+        if (!$tariff) {
+            error_log('No tariff found for base plan: ' . $base_plan);
+            return;
+        }
+
+        // Get order duration (months)
+        $order_duration = strtolower($subscription->get_billing_period()) === 'year' ? 12 : $subscription->data['billing_interval'];
+
+        // Send API request
+        $api_response = $this->send_vps_creation_request($tariff, $order_duration);
+
+        $order_id = $subscription->get_last_order();
         $order = wc_get_order($order_id);
 
-        foreach ($order->get_items() as $item_id => $item) {
-            $product = $item->get_product();
-            $product_id = $product->get_id();
+        if ($api_response && $api_response['status']) {
+            // Save VPS details to database
+            $this->save_vps_details($order_id, $tariff, $api_response['data']);
 
-            // Get product name
-            $product_name = $product->get_name();
-
-            // Map product to VPS tariff
-            $tariff_map = [
-                'basic_product' => 'Start',
-                'standard_product' => 'Expert',
-                'classic_product' => 'Classic',
-                'professional_product' => 'Greate'
-            ];
-
-            $product_slug = $product->get_slug();
-            $tariff = $tariff_map[$product_slug] ?? null;
-
-            if (!$tariff) continue;
-
-            // Get order duration (months)
-            $order_duration = $this->get_order_duration($order);
-
-            // Send API request
-            $api_response = $this->send_vps_creation_request($tariff, $order_duration);
-
-            if ($api_response && $api_response['status']) {
-                // Save VPS details to database
-                $this->save_vps_details($order_id, $tariff, $api_response['data']);
-
-                // Send credentials email
-                $this->send_vps_credentials_email($order, $api_response['data']);
-            }
+            // Send credentials email
+            $this->send_vps_credentials_email($order, $api_response['data']);
         }
     }
 
@@ -384,6 +400,12 @@ class GoVPSProvisioningPlugin
 
     private function send_vps_credentials_email($order, $vps_data)
     {
+
+        // Add filters for sender email and name
+        add_filter('wp_mail_from_name', function ($original_name) {
+            return 'SurgeVps';
+        });
+
         $to = $order->get_billing_email();
         $subject = '🎉 Your Order is Confirmed! Let the Trading Begin!';
         $message = '
@@ -394,7 +416,7 @@ class GoVPSProvisioningPlugin
         <p><strong>Your new VPS login credentials:</strong></p>
 
         <ul>
-            <li><strong>IP Address:</strong> ' . $vps_data['ip'] . ':' . $vps_data['port'] .'</li>
+            <li><strong>IP Address:</strong> ' . $vps_data['ip'] . ':' . $vps_data['port'] . '</li>
             <li><strong>Username:</strong> ' . $vps_data['username'] . '</li>
             <li><strong>Password:</strong> ' . $vps_data['password'] . '</li>
             <li><strong>Start Date:</strong> ' . $vps_data['paid_to'] . '</li>
@@ -416,7 +438,16 @@ class GoVPSProvisioningPlugin
 
     ';
 
-        wp_mail($to, $subject, $message, array('Content-Type: text/html'));
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+        );
+
+        wp_mail($to, $subject, $message, $headers);
+
+        // Remove the filters after sending the email
+        remove_filter('wp_mail_from_name', function ($original_name) {
+            return 'SurgeVps';
+        });
     }
 
     private function get_order_duration($order)
@@ -426,7 +457,7 @@ class GoVPSProvisioningPlugin
         return min(max(1, $order->get_meta('_order_duration', true)), 12);
     }
 
-    private function log_webhook_request($request)
+    private function log_request($request)
     {
         // Get the plugin's log file path
         $log_file = plugin_dir_path(__FILE__) . 'go-vps--' . date('Y-m-d') . '.log';
