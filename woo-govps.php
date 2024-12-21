@@ -504,6 +504,12 @@ class GoVPSProvisioningPlugin
     private function send_vps_credentials_email($order, $vps_data)
     {
 
+        // Calculate duration from paid_at to paid_to
+        $start_date = new DateTime($vps_data['paid_at']);
+        $end_date = new DateTime($vps_data['paid_to']);
+        $interval = $start_date->diff($end_date);
+        $duration = $interval->m + ($interval->y * 12);
+
         // Add filters for sender email and name
         add_filter('wp_mail_from_name', function ($original_name) {
             return 'SurgeVps';
@@ -522,7 +528,9 @@ class GoVPSProvisioningPlugin
             <li><strong>IP Address:</strong> ' . $vps_data['ip'] . ':' . $vps_data['port'] . '</li>
             <li><strong>Username:</strong> ' . $vps_data['username'] . '</li>
             <li><strong>Password:</strong> ' . $vps_data['password'] . '</li>
-            <li><strong>Start Date:</strong> ' . $vps_data['paid_to'] . '</li>
+            <li><strong>Duration:</strong> ' . $duration . ' ' . ($duration == 1 ? 'month' : 'months') . '</li>
+            <li><strong>Start Date:</strong> ' . date('Y-m-d', strtotime($vps_data['paid_at'])) . '</li>
+            <li><strong>End Date:</strong> ' . date('Y-m-d', strtotime($vps_data['paid_to'])) . '</li>
         </ul>
 
         <p>Your Forex VPS is now all setup and ready for action! <br /> We\'re excited to see you dive in and start trading like a pro.</p>
@@ -553,20 +561,27 @@ class GoVPSProvisioningPlugin
         });
     }
 
-
-    private function send_vps_renewal_email($order, $renewal_data)
-    {
-
-        add_filter('wp_mail_from_name', function ($original_name) {
+    private function send_vps_renewal_email($order, $renewal_data) {
+        // Get the subscription for this order
+        $subscriptions = wcs_get_subscriptions_for_order($order);
+        $subscription = reset($subscriptions);
+        
+        // Calculate duration in months
+        $duration = strtolower($subscription->get_billing_period()) === 'year' 
+            ? 12 
+            : $subscription->data['billing_interval'];
+        
+        add_filter('wp_mail_from_name', function($original_name) {
             return 'SurgeVps';
         });
-
+    
         $to = $order->get_billing_email();
         $subject = '🎉 Your VPS Has Been Successfully Renewed!';
         $message = '<p>Hey ' . $order->get_billing_first_name() . ',</p>
         <p>Great news! Your VPS has been successfully renewed.</p>
         <p><strong>Renewal Details:</strong></p>
         <ul>
+            <li><strong>Duration:</strong> ' . $duration . ' ' . ($duration == 1 ? 'month' : 'months') . '</li>
             <li><strong>New Expiry Date:</strong> ' . $renewal_data['paid_to'] . '</li>
         </ul>
         <p>Your VPS will continue to operate without any interruption.</p>
@@ -575,15 +590,15 @@ class GoVPSProvisioningPlugin
         <p>https://surgevps.com/contact/</p>
         <p>Thank you for continuing to choose SurgeVps!</p>
         <p>Best regards,<br>The SurgeVps Team 🌟</p>';
-
+    
         $headers = array(
             'Content-Type: text/html; charset=UTF-8',
         );
-
+    
         wp_mail($to, $subject, $message, $headers);
-
-        // Remove the filters        
-        remove_filter('wp_mail_from_name', function ($original_name) {
+    
+        // Remove the filterS
+        remove_filter('wp_mail_from_name', function($original_name) {
             return 'SurgeVps';
         });
     }
