@@ -22,13 +22,13 @@ class GoVPSProvisioningPlugin
     {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'vps_servers';
-		
+
         add_action('admin_init', [$this, 'check_dependencies']);
         add_action('admin_notices', [$this, 'show_dependency_notices']);
 
-   		add_action('woocommerce_subscription_status_active', [$this, 'handle_vps_active_subscriptions'], 10, 1);
-		
-		
+        add_action('woocommerce_subscription_status_active', [$this, 'handle_vps_active_subscriptions'], 10, 1);
+
+
         // Activation hook for creating database table
         register_activation_hook(__FILE__, [$this, 'create_vps_table']);
 
@@ -359,20 +359,20 @@ class GoVPSProvisioningPlugin
         return json_decode(wp_remote_retrieve_body($response), true);
     }
 
-	public function vps_exists($subscription_id)
+    public function vps_exists($subscription_id)
     {
         global $wpdb;
-    
+
         $vps_id = $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT vps_id FROM {$this->table_name} WHERE order_id = %d",
                 $subscription_id
             )
         );
-    
+
         return !empty($vps_id);
-    }	
-	
+    }
+
     public function renew_vps_subscription($subscription)
     {
         global $wpdb;
@@ -416,19 +416,22 @@ class GoVPSProvisioningPlugin
             );
 
 
-                $this->send_vps_renewal_email($subscription, [
-                    'paid_to' => $api_response['data']['paid_to']
-                ]);
-            
+            $this->send_vps_renewal_email($subscription, [
+                'paid_to' => $api_response['data']['paid_to']
+            ]);
         } else {
-            error_log('Failed to renew VPS for order: ' . $order_id);
+            // Send failure email to admin
+            $vps_id = $vps_details->vps_id ?? 'N/A';
+            $reason = $api_response['message'] ?? 'Unknown error';
+            error_log('Failed to provision VPS for order: ' . $order_id . ' - Reason: ' . $reason);
+            $this->send_admin_failure_email($vps_id, $order_id, $reason);
         }
     }
 
 
 
 
-	
+
     /**
      * Handle API Requests for new and old subscriptions
      * this is 100% working
@@ -436,19 +439,19 @@ class GoVPSProvisioningPlugin
      * @param  $subscription
      * @return void
      */
-	 public function handle_vps_active_subscriptions($subscription) {
+    public function handle_vps_active_subscriptions($subscription)
+    {
 
- 		 $vsp_id = $this->vps_exists($subscription->id);
-		 
- 		 if($vsp_id) {
-			 $this->renew_vps_subscription($subscription);
- 			
-		 } else {
-			  $this->provision_vps_for_order($subscription);
- 		 }
-	 }
+        $vsp_id = $this->vps_exists($subscription->id);
 
-	public function provision_vps_for_order($subscription)
+        if ($vsp_id) {
+            $this->renew_vps_subscription($subscription);
+        } else {
+            $this->provision_vps_for_order($subscription);
+        }
+    }
+
+    public function provision_vps_for_order($subscription)
     {
         $items = $subscription->get_items();
         $item = reset($items);
@@ -496,8 +499,8 @@ class GoVPSProvisioningPlugin
         // Send API request
         $api_response = $this->send_vps_creation_request($tariff, $order_duration);
 
-		 
-		   $order_id = $subscription->id;
+
+        $order_id = $subscription->id;
 
         if ($api_response && $api_response['status']) {
             // Save VPS details to database
@@ -505,6 +508,13 @@ class GoVPSProvisioningPlugin
 
             // Send credentials email
             $this->send_vps_credentials_email($subscription, $api_response['data']);
+        } else {
+
+            // Send failure email to admin
+            $vps_id = $api_response['data']['vps_id'] ?? 'N/A';
+            $reason = $api_response['message'] ?? 'Unknown error';
+            error_log('Failed to provision VPS for order: ' . $order_id . ' - Reason: ' . $reason);
+            $this->send_admin_failure_email($vps_id, $order_id, $reason);
         }
     }
 
@@ -587,18 +597,19 @@ class GoVPSProvisioningPlugin
             return 'SurgeVps';
         });
     }
- 
-    private function send_vps_renewal_email($order, $renewal_data) {
-       
+
+    private function send_vps_renewal_email($order, $renewal_data)
+    {
+
         // Calculate duration in months
-        $duration = strtolower($order->get_billing_period()) === 'year' 
-            ? 12 
+        $duration = strtolower($order->get_billing_period()) === 'year'
+            ? 12
             : $order->get_billing_interval();
-        
-        add_filter('wp_mail_from_name', function($original_name) {
+
+        add_filter('wp_mail_from_name', function ($original_name) {
             return 'SurgeVps';
         });
-    
+
         $to = $order->get_billing_email();
         $subject = '🎉 Your VPS Has Been Successfully Renewed!';
         $message = '<p>Hey ' . $order->get_billing_first_name() . ',</p>
@@ -614,17 +625,41 @@ class GoVPSProvisioningPlugin
         <p>https://surgevps.com/contact/</p>
         <p>Thank you for continuing to choose SurgeVps!</p>
         <p>Best regards,<br>The SurgeVps Team 🌟</p>';
-    
+
         $headers = array(
             'Content-Type: text/html; charset=UTF-8',
         );
-    
+
         wp_mail($to, $subject, $message, $headers);
-    
+
         // Remove the filterS
-        remove_filter('wp_mail_from_name', function($original_name) {
+        remove_filter('wp_mail_from_name', function ($original_name) {
             return 'SurgeVps';
         });
+    }
+
+    private function send_admin_failure_email($vps_id, $order_id, $reason)
+    {
+        $admin_email = get_option('admin_email');
+        $subject = "VPS Provisioning Failed for Subscription #$order_id";
+        $message = "
+        <p>Hello Admin,</p>
+        <p>The VPS provisioning for order <strong>#$order_id</strong> has failed.</p>
+        <p><strong>VPS Ip:</strong> {$vps_id}</p>
+        <p><strong>Subscription ID:</strong> {$order_id}</p>
+        <p><strong>Failure Reason:</strong> {$reason}</p>
+        <p>Please check the logs and resolve the issue.</p>
+        <p>Regards,<br>Surge VPS Provisioning Plugin</p>
+    ";
+
+        // Set headers for HTML email
+        $headers = [
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . $admin_email . '>'
+        ];
+
+        // Send the email
+        wp_mail($admin_email, $subject, $message, $headers);
     }
 
 

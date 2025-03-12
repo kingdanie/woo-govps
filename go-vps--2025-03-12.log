@@ -1,0 +1,137 @@
+Govps API Response: Array
+(
+    [headers] => WpOrg\Requests\Utility\CaseInsensitiveDictionary Object
+        (
+            [data:protected] => Array
+                (
+                    [server] => nginx/1.18.0 (Ubuntu)
+                    [date] => Wed, 12 Mar 2025 15:16:25 GMT
+                    [content-type] => application/json
+                    [x-powered-by] => PHP/8.3.4
+                    [cache-control] => private, must-revalidate
+                    [x-ratelimit-limit] => 60
+                    [x-ratelimit-remaining] => 59
+                    [pragma] => no-cache
+                    [expires] => -1
+                    [access-control-allow-origin] => *
+                )
+
+        )
+
+    [body] => {"message":"The month field is required when day is not present. (and 1 more error)","errors":{"month":["The month field is required when day is not present."],"day":["The day field is required when month is not present."]}}
+    [response] => Array
+        (
+            [code] => 422
+            [message] => Unprocessable Entity
+        )
+
+    [cookies] => Array
+        (
+        )
+
+    [filename] => 
+    [http_response] => WP_HTTP_Requests_Response Object
+        (
+            [data] => 
+            [headers] => 
+            [status] => 
+            [response:protected] => WpOrg\Requests\Response Object
+                (
+                    [body] => {"message":"The month field is required when day is not present. (and 1 more error)","errors":{"month":["The month field is required when day is not present."],"day":["The day field is required when month is not present."]}}
+                    [raw] => HTTP/1.1 422 Unprocessable Content
+Server: nginx/1.18.0 (Ubuntu)
+Date: Wed, 12 Mar 2025 15:16:25 GMT
+Content-Type: application/json
+Transfer-Encoding: chunked
+Connection: close
+X-Powered-By: PHP/8.3.4
+Cache-Control: private, must-revalidate
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 59
+pragma: no-cache
+expires: -1
+Access-Control-Allow-Origin: *
+
+{"message":"The month field is required when day is not present. (and 1 more error)","errors":{"month":["The month field is required when day is not present."],"day":["The day field is required when month is not present."]}}
+                    [headers] => WpOrg\Requests\Response\Headers Object
+                        (
+                            [data:protected] => Array
+                                (
+                                    [server] => Array
+                                        (
+                                            [0] => nginx/1.18.0 (Ubuntu)
+                                        )
+
+                                    [date] => Array
+                                        (
+                                            [0] => Wed, 12 Mar 2025 15:16:25 GMT
+                                        )
+
+                                    [content-type] => Array
+                                        (
+                                            [0] => application/json
+                                        )
+
+                                    [x-powered-by] => Array
+                                        (
+                                            [0] => PHP/8.3.4
+                                        )
+
+                                    [cache-control] => Array
+                                        (
+                                            [0] => private, must-revalidate
+                                        )
+
+                                    [x-ratelimit-limit] => Array
+                                        (
+                                            [0] => 60
+                                        )
+
+                                    [x-ratelimit-remaining] => Array
+                                        (
+                                            [0] => 59
+                                        )
+
+                                    [pragma] => Array
+                                        (
+                                            [0] => no-cache
+                                        )
+
+                                    [expires] => Array
+                                        (
+                                            [0] => -1
+                                        )
+
+                                    [access-control-allow-origin] => Array
+                                        (
+                                            [0] => *
+                                        )
+
+                                )
+
+                        )
+
+                    [status_code] => 422
+                    [protocol_version] => 1.1
+                    [success] => 
+                    [redirects] => 0
+                    [url] => https://api-test.govpsfx.com/api/get
+                    [history] => Array
+                        (
+                        )
+
+                    [cookies] => WpOrg\Requests\Cookie\Jar Object
+                        (
+                            [cookies:protected] => Array
+                                (
+                                )
+
+                        )
+
+                )
+
+            [filename:protected] => 
+        )
+
+)
+
