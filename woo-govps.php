@@ -2,11 +2,11 @@
 /*
 Plugin Name: GoVPS Provisioning Plugin
 Description: This plugin sends API Requests to GoVPS to create VPS accounts from Completed WooComerce Orders and Sends the VPS Credentials to the Customer.
-Version: 1.2
+Version: 1.3
 Author: Jorion Tech
 Author URI: https://jorionng.com
-Requires at least: 5.0
-Requires PHP: 7.2
+Requires at least: 6.4
+Requires PHP: 7.4
 */
 
 if (!defined('ABSPATH')) exit; // Exit if accessed directly
@@ -22,16 +22,13 @@ class GoVPSProvisioningPlugin
     {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'vps_servers';
-
+		
         add_action('admin_init', [$this, 'check_dependencies']);
         add_action('admin_notices', [$this, 'show_dependency_notices']);
 
-        // Hook for subscription orders
-        add_action('woocommerce_subscription_payment_complete', [$this, 'provision_vps_for_subscription'], 10, 1);
-
-        // Optional: Hook for renewal orders
-        add_action('woocommerce_subscription_renewal_payment_complete', [$this, 'renew_vps_subscription'], 10, 1);
-
+   		add_action('woocommerce_subscription_status_active', [$this, 'handle_vps_active_subscriptions'], 10, 1);
+		
+		
         // Activation hook for creating database table
         register_activation_hook(__FILE__, [$this, 'create_vps_table']);
 
@@ -44,6 +41,7 @@ class GoVPSProvisioningPlugin
         // Admin notices for missing API keys
         add_action('admin_notices', [$this, 'display_api_key_notice']);
     }
+
 
     public function add_admin_menu()
     {
@@ -194,14 +192,14 @@ class GoVPSProvisioningPlugin
     public function render_admin_page()
     {
         global $wpdb;
-        $servers = $wpdb->get_results("SELECT * FROM {$this->table_name} ORDER BY paid_at DESC");
+        $servers = $wpdb->get_results("SELECT * FROM {$this->table_name} ORDER BY paid_at DESC LIMIT 20");
     ?>
         <div class="wrap">
             <h1>VPS Servers</h1>
             <table class="wp-list-table widefat fixed striped">
                 <thead>
                     <tr>
-                        <th>Order ID</th>
+                        <th>Subscription ID</th>
                         <th>Product Type</th>
                         <th>VPS ID</th>
                         <th>IP Address</th>
@@ -361,14 +359,28 @@ class GoVPSProvisioningPlugin
         return json_decode(wp_remote_retrieve_body($response), true);
     }
 
+	public function vps_exists($subscription_id)
+    {
+        global $wpdb;
+    
+        $vps_id = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT vps_id FROM {$this->table_name} WHERE order_id = %d",
+                $subscription_id
+            )
+        );
+    
+        return !empty($vps_id);
+    }	
+	
     public function renew_vps_subscription($subscription)
     {
         global $wpdb;
 
         // Get the order ID
-        $order_id = $subscription->get_last_order();
+        $order_id = $subscription->id; //change this back to parent id when you are done testing
         if (!$order_id) {
-            error_log('No order found for subscription: ' . $subscription->get_id());
+            error_log('No order found for subscription');
             return;
         }
 
@@ -381,14 +393,14 @@ class GoVPSProvisioningPlugin
         );
 
         if (!$vps_details) {
-            error_log('No VPS details found for order: ' . $order_id);
+            error_log('No VPS details found for order');
             return;
         }
 
         // Get order duration (months)
         $order_duration = strtolower($subscription->get_billing_period()) === 'year'
             ? 12
-            : $subscription->data['billing_interval'];
+            : $subscription->get_billing_interval();
 
         // Send renewal request
         $api_response = $this->renew_vps_request($vps_details->vps_id, $order_duration);
@@ -403,24 +415,40 @@ class GoVPSProvisioningPlugin
                 ['order_id' => $order_id]
             );
 
-            // Send a confirmation email
-            $order = wc_get_order($order_id);
-            if ($order) {
-                $this->send_vps_renewal_email($order, [
+
+                $this->send_vps_renewal_email($subscription, [
                     'paid_to' => $api_response['data']['paid_to']
                 ]);
-            }
+            
         } else {
             error_log('Failed to renew VPS for order: ' . $order_id);
         }
     }
 
-    public function provision_vps_for_subscription($subscription)
-    {
-        $this->provision_vps_for_order($subscription);
-    }
 
-    public function provision_vps_for_order($subscription)
+
+
+	
+    /**
+     * Handle API Requests for new and old subscriptions
+     * this is 100% working
+     *
+     * @param  $subscription
+     * @return void
+     */
+	 public function handle_vps_active_subscriptions($subscription) {
+
+ 		 $vsp_id = $this->vps_exists($subscription->id);
+		 
+ 		 if($vsp_id) {
+			 $this->renew_vps_subscription($subscription);
+ 			
+		 } else {
+			  $this->provision_vps_for_order($subscription);
+ 		 }
+	 }
+
+	public function provision_vps_for_order($subscription)
     {
         $items = $subscription->get_items();
         $item = reset($items);
@@ -463,23 +491,22 @@ class GoVPSProvisioningPlugin
         }
 
         // Get order duration (months)
-        $order_duration = strtolower($subscription->get_billing_period()) === 'year' ? 12 : $subscription->data['billing_interval'];
+        $order_duration = strtolower($subscription->get_billing_period()) === 'year' ? 12 : $subscription->get_billing_interval();
 
         // Send API request
         $api_response = $this->send_vps_creation_request($tariff, $order_duration);
 
-        $order_id = $subscription->get_last_order();
-        $order = wc_get_order($order_id);
+		 
+		   $order_id = $subscription->id;
 
         if ($api_response && $api_response['status']) {
             // Save VPS details to database
             $this->save_vps_details($order_id, $tariff, $api_response['data']);
 
             // Send credentials email
-            $this->send_vps_credentials_email($order, $api_response['data']);
+            $this->send_vps_credentials_email($subscription, $api_response['data']);
         }
     }
-
 
     private function save_vps_details($order_id, $product_type, $vps_data)
     {
@@ -560,16 +587,13 @@ class GoVPSProvisioningPlugin
             return 'SurgeVps';
         });
     }
-
+ 
     private function send_vps_renewal_email($order, $renewal_data) {
-        // Get the subscription for this order
-        $subscriptions = wcs_get_subscriptions_for_order($order);
-        $subscription = reset($subscriptions);
-        
+       
         // Calculate duration in months
-        $duration = strtolower($subscription->get_billing_period()) === 'year' 
+        $duration = strtolower($order->get_billing_period()) === 'year' 
             ? 12 
-            : $subscription->data['billing_interval'];
+            : $order->get_billing_interval();
         
         add_filter('wp_mail_from_name', function($original_name) {
             return 'SurgeVps';
@@ -603,12 +627,6 @@ class GoVPSProvisioningPlugin
         });
     }
 
-    private function get_order_duration($order)
-    {
-        // This is a placeholder. You'll need to implement logic to get the order duration
-        // This could be from a custom field, product variation, or other order metadata
-        return min(max(1, $order->get_meta('_order_duration', true)), 12);
-    }
 
     private function log_request($request)
     {
