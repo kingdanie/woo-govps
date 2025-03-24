@@ -192,7 +192,7 @@ class GoVPSProvisioningPlugin
     public function render_admin_page()
     {
         global $wpdb;
-        $servers = $wpdb->get_results("SELECT * FROM {$this->table_name} ORDER BY paid_at DESC LIMIT 25");
+        $servers = $wpdb->get_results("SELECT * FROM {$this->table_name} ORDER BY paid_at DESC LIMIT 50");
     ?>
         <div class="wrap">
             <h1>VPS Servers</h1>
