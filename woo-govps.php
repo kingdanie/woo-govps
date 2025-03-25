@@ -28,6 +28,8 @@ class GoVPSProvisioningPlugin
 
         add_action('woocommerce_subscription_status_active', [$this, 'handle_vps_active_subscriptions'], 10, 1);
 
+        add_action('woocommerce_subscription_renewal_payment_complete', [$this, 'handle_vps_active_subscriptions'], 10, 1);
+		
 
         // Activation hook for creating database table
         register_activation_hook(__FILE__, [$this, 'create_vps_table']);
@@ -409,7 +411,7 @@ class GoVPSProvisioningPlugin
         // Send renewal request
         $api_response = $this->renew_vps_request($vps_details->vps_id, $order_duration);
 
-        if ($api_response && $api_response['status']) {
+        if (!empty($api_response) && !($api_response['status'])) {
             // Update the paid_to date in the database
             $wpdb->update(
                 $this->table_name,
@@ -426,7 +428,7 @@ class GoVPSProvisioningPlugin
         } else {
             // Send failure email to admin
             $vps_id = $vps_details->vps_id ?? 'N/A';
-            $reason = $api_response['message'] ?? 'Unknown error';
+            $reason = isset($api_response['error']) ? $api_response['error'] : (isset($api_response['message']) ? $api_response['message'] : 'Unknown error');
             error_log('Failed to provision VPS for order: ' . $order_id . ' - Reason: ' . $reason);
             $this->send_admin_failure_email($vps_id, $order_id, $reason);
         }
@@ -506,7 +508,7 @@ class GoVPSProvisioningPlugin
 
         $order_id = $subscription->id;
 
-        if ($api_response && $api_response['status']) {
+        if (!empty($api_response) && !($api_response['status'])) {
             // Save VPS details to database
             $this->save_vps_details($order_id, $tariff, $api_response['data']);
 
@@ -516,7 +518,7 @@ class GoVPSProvisioningPlugin
 
             // Send failure email to admin
             $vps_id = $api_response['data']['vps_id'] ?? 'N/A';
-            $reason = $api_response['message'] ?? 'Unknown error';
+            $reason = isset($api_response['error']) ? $api_response['error'] : (isset($api_response['message']) ? $api_response['message'] : 'Unknown error');
             error_log('Failed to provision VPS for order: ' . $order_id . ' - Reason: ' . $reason);
             $this->send_admin_failure_email($vps_id, $order_id, $reason);
         }
