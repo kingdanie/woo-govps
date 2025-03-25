@@ -2,11 +2,11 @@
 /*
 Plugin Name: GoVPS Provisioning Plugin
 Description: This plugin sends API Requests to GoVPS to create VPS accounts from Completed WooComerce Orders and Sends the VPS Credentials to the Customer.
-Version: 1.3
+Version: 1.2.2
 Author: Jorion Tech
 Author URI: https://jorionng.com
 Requires at least: 6.4
-Requires PHP: 7.4
+Requires PHP: 8.0
 */
 
 if (!defined('ABSPATH')) exit; // Exit if accessed directly
