@@ -2,7 +2,7 @@
 /*
 Plugin Name: GoVPS Provisioning Plugin
 Description: This plugin sends API Requests to GoVPS to create VPS accounts from Completed WooComerce Orders and Sends the VPS Credentials to the Customer.
-Version: 1.2.2
+Version: 1.2.3
 Author: Jorion Tech
 Author URI: https://jorionng.com
 Requires at least: 6.4
@@ -648,20 +648,17 @@ class GoVPSProvisioningPlugin
     {
         $admin_email = get_option('admin_email');
         $subject = "VPS Provisioning Failed for Subscription #$order_id";
-        $message = "
-        <p>Hello Admin,</p>
+        $message = "<p>Hello Admin,</p>
         <p>The VPS provisioning for order <strong>#$order_id</strong> has failed.</p>
         <p><strong>VPS Ip:</strong> {$vps_id}</p>
         <p><strong>Subscription ID:</strong> {$order_id}</p>
         <p><strong>Failure Reason:</strong> {$reason}</p>
-        <p>Please check the logs and resolve the issue.</p>
-        <p>Regards,<br>Surge VPS Provisioning Plugin</p>
-    ";
+        <p>Please Contact GoVPS Support Team for assistance.</p>
+        <p>Regards,<br>Surge VPS Provisioning Plugin</p>";
 
         // Set headers for HTML email
         $headers = [
             'Content-Type: text/html; charset=UTF-8',
-            'From: ' . get_bloginfo('name') . ' <' . $admin_email . '>'
         ];
 
         // Send the email
