@@ -411,7 +411,7 @@ class GoVPSProvisioningPlugin
         // Send renewal request
         $api_response = $this->renew_vps_request($vps_details->vps_id, $order_duration);
 
-        if (!empty($api_response) && !($api_response['status'])) {
+        if (!empty($api_response) && $api_response['status'] === true) {
             // Update the paid_to date in the database
             $wpdb->update(
                 $this->table_name,
@@ -508,7 +508,7 @@ class GoVPSProvisioningPlugin
 
         $order_id = $subscription->id;
 
-        if (!empty($api_response) && !($api_response['status'])) {
+        if (!empty($api_response) && $api_response['status'] === true) {
             // Save VPS details to database
             $this->save_vps_details($order_id, $tariff, $api_response['data']);
 
